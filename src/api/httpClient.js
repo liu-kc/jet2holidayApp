@@ -1,7 +1,10 @@
 import axios from 'axios'
 
+const configuredBaseURL = import.meta.env.VITE_API_BASE_URL
+const resolvedBaseURL = configuredBaseURL ?? (import.meta.env.DEV ? '' : 'http://localhost:8080')
+
 const httpClient = axios.create({
-  baseURL: import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080',
+  baseURL: resolvedBaseURL,
   timeout: 15000
 })
 

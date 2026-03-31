@@ -17,7 +17,9 @@ Vue 3 + Vite frontend for a single-user portfolio management dashboard.
    ```
 2. Configure environment:
    - Copy `.env.example` to `.env`
-   - `VITE_API_BASE_URL` (real backend URL, default `http://localhost:8080`)
+   - `VITE_API_BASE_URL`
+     - leave empty in local dev to use Vite proxy (`/api` -> `http://localhost:8080`) and avoid CORS
+     - set full backend URL (for non-proxy deployments), e.g. `http://localhost:8080`
    - `VITE_USE_MOCK_API` (`true` to use in-memory mock backend, default `false`)
 3. Run development server:
    ```bash
@@ -33,7 +35,8 @@ Vue 3 + Vite frontend for a single-user portfolio management dashboard.
   - Uses local in-memory data for account, holdings, dashboard summary/performance, and market refresh.
   - Supports add/edit/delete holding, cash update, and chart interactions without backend.
 - **Real mode**: set `VITE_USE_MOCK_API=false`
-  - Calls Spring Boot REST API using `VITE_API_BASE_URL`.
+  - Calls Spring Boot REST API.
+  - In local dev, proxy mode avoids browser CORS issues.
 
 ## Routes
 - `/dashboard` (default)

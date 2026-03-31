@@ -16,11 +16,38 @@ const selectedHolding = ref(null)
 const loading = computed(() => store.loading)
 const holdings = computed(() => store.holdings)
 const summaryItems = computed(() => store.summary?.items || [])
+const latestSnapshots = computed(() => store.latestSnapshots || [])
 const currency = computed(() => store.account?.currency || 'USD')
 
 const mergedRows = computed(() => {
   const enrichedById = new Map(summaryItems.value.map((item) => [item.id, item]))
-  return holdings.value.map((item) => ({ ...item, ...enrichedById.get(item.id) }))
+  const latestBySymbol = new Map(latestSnapshots.value.map((item) => [item.symbol, item]))
+
+  return holdings.value.map((item) => {
+    const enriched = enrichedById.get(item.id) || {}
+    const latest = latestBySymbol.get(`${item.symbol || ''}`.toUpperCase()) || {}
+
+    const currentPrice = enriched.currentPrice ?? latest.currentPrice
+    const marketValue =
+      enriched.marketValue ??
+      (currentPrice != null ? Number(item.shares || 0) * Number(currentPrice || 0) : null)
+    const totalCost = Number(item.shares || 0) * Number(item.costBasis || 0)
+    const profitLoss = enriched.profitLoss ?? (marketValue != null ? marketValue - totalCost : null)
+    const profitLossPercent =
+      enriched.profitLossPercent ??
+      (profitLoss != null && totalCost > 0 ? (profitLoss / totalCost) * 100 : null)
+
+    return {
+      ...item,
+      ...enriched,
+      currentPrice,
+      marketValue,
+      profitLoss,
+      profitLossPercent,
+      snapshotDate: enriched.snapshotDate ?? latest.snapshotDate,
+      currency: item.currency || latest.currency || currency.value
+    }
+  })
 })
 
 const filteredRows = computed(() => {
@@ -33,10 +60,7 @@ const filteredRows = computed(() => {
 })
 
 const loadData = async () => {
-  try {
-    await Promise.all([store.loadAccount(), store.loadHoldings(), store.loadSummary()])
-  } catch {
-  }
+  await Promise.allSettled([store.loadAccount(), store.loadHoldings(), store.loadSummary()])
 }
 
 const openAdd = () => {

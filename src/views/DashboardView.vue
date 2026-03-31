@@ -18,14 +18,41 @@ const summary = computed(() => store.summary)
 const account = computed(() => store.account)
 const performance = computed(() => store.performance)
 const loading = computed(() => store.loading)
-const dashboardItems = computed(() => summary.value?.items || [])
+const holdings = computed(() => store.holdings || [])
+const latestSnapshots = computed(() => store.latestSnapshots || [])
+const refreshResult = computed(() => store.marketRefreshResult)
 const currency = computed(() => account.value?.currency || summary.value?.currency || 'USD')
 
-const loadData = async () => {
-  try {
-    await Promise.all([store.loadAccount(), store.loadDashboard(selectedRange.value)])
-  } catch {
+const dashboardItems = computed(() => {
+  if (Array.isArray(summary.value?.items) && summary.value.items.length) {
+    return summary.value.items
   }
+
+  const latestBySymbol = new Map(latestSnapshots.value.map((item) => [item.symbol, item]))
+  return holdings.value.map((item) => {
+    const latest = latestBySymbol.get(`${item.symbol || ''}`.toUpperCase()) || {}
+    const currentPrice = latest.currentPrice
+    const marketValue = currentPrice != null ? Number(item.shares || 0) * Number(currentPrice || 0) : null
+    const totalCost = Number(item.shares || 0) * Number(item.costBasis || 0)
+    const profitLoss = marketValue != null ? marketValue - totalCost : null
+
+    return {
+      ...item,
+      currentPrice,
+      marketValue,
+      profitLoss,
+      profitLossPercent: profitLoss != null && totalCost > 0 ? (profitLoss / totalCost) * 100 : null,
+      snapshotDate: latest.snapshotDate
+    }
+  })
+})
+
+const loadData = async () => {
+  await Promise.allSettled([
+    store.loadAccount(),
+    store.loadHoldings(),
+    store.loadDashboard(selectedRange.value)
+  ])
 }
 
 const refreshMarket = async () => {
@@ -66,7 +93,19 @@ onMounted(loadData)
       </div>
     </div>
 
-    <LoadingSpinner v-if="loading.dashboard && !summary" />
+    <div v-if="refreshResult" class="refresh-status" :class="refreshResult.success ? 'ok' : 'warn'">
+      <div>
+        <strong>{{ refreshResult.message }}</strong>
+        <span>
+          Date: {{ refreshResult.snapshotDate }} ¡¤ Success: {{ refreshResult.refreshedCount || 0 }}
+        </span>
+      </div>
+      <small v-if="refreshResult.failedSymbols?.length">
+        Failed: {{ refreshResult.failedSymbols.join(', ') }}
+      </small>
+    </div>
+
+    <LoadingSpinner v-if="loading.dashboard && !summary && !holdings.length" />
 
     <template v-else>
       <SummaryCards :summary="summary" :currency="currency" />
@@ -113,6 +152,32 @@ onMounted(loadData)
   display: flex;
   gap: 0.6rem;
   flex-wrap: wrap;
+}
+
+.refresh-status {
+  border-radius: 0.65rem;
+  padding: 0.7rem 0.85rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.refresh-status strong {
+  display: block;
+}
+
+.refresh-status span {
+  color: #54607c;
+  font-size: 0.86rem;
+}
+
+.refresh-status.ok {
+  background: #e7f8ef;
+  border: 1px solid #afe3c6;
+}
+
+.refresh-status.warn {
+  background: #fff4e4;
+  border: 1px solid #ffd6a2;
 }
 
 .grid-two {

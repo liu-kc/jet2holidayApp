@@ -297,3 +297,19 @@ export const mockGetStatePreview = () => ({
   holdings: clone(state.holdings),
   todayLabel: formatDate(toIsoDate(today))
 })
+export const mockGetLatestMarketData = async (symbols = []) => {
+  await delay()
+  const snapshotDate = toIsoDate(today)
+
+  return symbols
+    .map((rawSymbol) => `${rawSymbol || ''}`.trim().toUpperCase())
+    .filter(Boolean)
+    .filter((symbol) => symbol in state.prices)
+    .map((symbol) => ({
+      symbol,
+      snapshotDate,
+      currentPrice: round4(Number(state.prices[symbol])),
+      currency: 'USD',
+      source: 'MOCK'
+    }))
+}

@@ -3,27 +3,29 @@ import { ref } from 'vue'
 import { getAccount, updateCashBalance } from '../api/accountApi'
 import { getPortfolioItems, createPortfolioItem, updatePortfolioItem, deletePortfolioItem } from '../api/portfolioApi'
 import { getDashboardSummary, getPerformance } from '../api/dashboardApi'
-import { refreshMarketData } from '../api/marketDataApi'
+import { refreshMarketData, getLatestMarketData } from '../api/marketDataApi'
 import { normalizeApiError } from '../api/httpClient'
 
+const isNotFoundError = (error) => Number(error?.response?.status) === 404
+
 export const usePortfolioStore = defineStore('portfolio', () => {
-  // Core domain state shared across dashboard and holdings pages.
   const account = ref(null)
   const summary = ref(null)
   const holdings = ref([])
   const performance = ref({ range: '1M', points: [] })
+  const latestSnapshots = ref([])
+  const marketRefreshResult = ref(null)
 
-  // Granular loading flags let each view render precise loading UI.
   const loading = ref({
     dashboard: false,
     holdings: false,
     performance: false,
     mutateHolding: false,
     updateCash: false,
-    refreshMarket: false
+    refreshMarket: false,
+    latestMarket: false
   })
 
-  // Global toast-like message consumed by App shell.
   const notification = ref({ type: 'success', message: '' })
 
   const setNotification = (type, message) => {
@@ -48,6 +50,10 @@ export const usePortfolioStore = defineStore('portfolio', () => {
     try {
       summary.value = await getDashboardSummary()
     } catch (error) {
+      if (isNotFoundError(error)) {
+        summary.value = null
+        return
+      }
       setNotification('error', normalizeApiError(error, 'Failed to load dashboard summary.'))
       throw error
     } finally {
@@ -59,12 +65,15 @@ export const usePortfolioStore = defineStore('portfolio', () => {
     loading.value.performance = true
     try {
       const response = await getPerformance(range)
-      // Normalize shape defensively so chart components never crash on partial payloads.
       performance.value = {
         range: response?.range || range,
         points: Array.isArray(response?.points) ? response.points : []
       }
     } catch (error) {
+      if (isNotFoundError(error)) {
+        performance.value = { range, points: [] }
+        return
+      }
       setNotification('error', normalizeApiError(error, 'Failed to load performance chart.'))
       throw error
     } finally {
@@ -72,7 +81,35 @@ export const usePortfolioStore = defineStore('portfolio', () => {
     }
   }
 
-  // Dashboard depends on both summary metrics and performance series.
+  const loadLatestSnapshots = async (symbols = null) => {
+    const symbolList = Array.isArray(symbols)
+      ? symbols
+      : holdings.value.map((item) => item.symbol)
+
+    const normalized = symbolList
+      .map((symbol) => `${symbol || ''}`.trim().toUpperCase())
+      .filter(Boolean)
+
+    if (!normalized.length) {
+      latestSnapshots.value = []
+      return
+    }
+
+    loading.value.latestMarket = true
+    try {
+      latestSnapshots.value = await getLatestMarketData(normalized)
+    } catch (error) {
+      if (isNotFoundError(error)) {
+        latestSnapshots.value = []
+        return
+      }
+      setNotification('error', normalizeApiError(error, 'Failed to load latest market data.'))
+      throw error
+    } finally {
+      loading.value.latestMarket = false
+    }
+  }
+
   const loadDashboard = async (range = '1M') => {
     await Promise.all([loadSummary(), loadPerformance(range)])
   }
@@ -81,6 +118,7 @@ export const usePortfolioStore = defineStore('portfolio', () => {
     loading.value.holdings = true
     try {
       holdings.value = await getPortfolioItems()
+      await loadLatestSnapshots(holdings.value.map((item) => item.symbol))
     } catch (error) {
       setNotification('error', normalizeApiError(error, 'Failed to load holdings.'))
       throw error
@@ -93,7 +131,6 @@ export const usePortfolioStore = defineStore('portfolio', () => {
     loading.value.mutateHolding = true
     try {
       await createPortfolioItem(payload)
-      // Keep holdings grid and dashboard cards/charts consistent after write operations.
       await Promise.all([loadHoldings(), loadSummary()])
       setNotification('success', 'Holding added successfully.')
     } catch (error) {
@@ -136,7 +173,6 @@ export const usePortfolioStore = defineStore('portfolio', () => {
     loading.value.updateCash = true
     try {
       await updateCashBalance({ cashBalance })
-      // Cash edits affect both account widget data and dashboard totals.
       await Promise.all([loadAccount(), loadSummary()])
       setNotification('success', 'Cash balance updated successfully.')
     } catch (error) {
@@ -151,10 +187,22 @@ export const usePortfolioStore = defineStore('portfolio', () => {
     loading.value.refreshMarket = true
     try {
       const response = await refreshMarketData()
-      const message = response?.message || 'Market data refreshed successfully.'
-      // Refresh affects valuation-sensitive areas: summary totals and performance chart.
-      await Promise.all([loadSummary(), loadPerformance(range)])
-      setNotification('success', message)
+      marketRefreshResult.value = response
+
+      await Promise.all([
+        loadSummary(),
+        loadPerformance(range),
+        loadLatestSnapshots()
+      ])
+
+      if (response?.success === false) {
+        const failed = Array.isArray(response?.failedSymbols) ? response.failedSymbols : []
+        const suffix = failed.length ? ` Failed: ${failed.join(', ')}` : ''
+        setNotification('error', `${response?.message || 'Market refresh completed with failures.'}${suffix}`)
+      } else {
+        setNotification('success', response?.message || 'Market data refreshed successfully.')
+      }
+
       return response
     } catch (error) {
       setNotification('error', normalizeApiError(error, 'Failed to refresh market data.'))
@@ -169,6 +217,8 @@ export const usePortfolioStore = defineStore('portfolio', () => {
     summary,
     holdings,
     performance,
+    latestSnapshots,
+    marketRefreshResult,
     loading,
     notification,
     clearNotification,
@@ -177,6 +227,7 @@ export const usePortfolioStore = defineStore('portfolio', () => {
     loadPerformance,
     loadDashboard,
     loadHoldings,
+    loadLatestSnapshots,
     createHolding,
     editHolding,
     removeHolding,
